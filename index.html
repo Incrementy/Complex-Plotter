@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPU-Accelerated Complex Number Grapher</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- KaTeX for LaTeX rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111111;
+            color: #f7fafc;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            cursor: grab;
+        }
+        .controls-ui-button, input[type="text"], select {
+            border: 1px solid #222222;
+            background-color: #111111;
+            color: #f7fafc;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.875rem;
+            border-radius: 0.375rem; /* 6px */
+            height: 2.5rem; /* 40px */
+            transition: background-color 0.2s;
+            font-weight: 500;
+        }
+        .controls-ui-button:hover, input[type="text"]:hover, select:hover {
+            background-color: #1f2937;
+        }
+        .controls-ui-button:focus, input[type="text"]:focus, select:focus {
+            outline: none;
+        }
+        
+        /* New container for all bottom UI elements */
+        #bottom-ui-container {
+            position: absolute;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            flex-direction: column-reverse; /* Stacks controls below action buttons */
+            align-items: center;
+            gap: 0.5rem;
+            width: 95%;
+            max-width: 900px;
+        }
+
+        #action-buttons {
+            display: flex;
+            gap: 0.5rem;
+            background-color: rgba(0, 0, 0, 0.9);
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            border: 1px solid #222222;
+        }
+        #action-buttons .zoom-btn {
+            width: 2.5rem;
+            font-size: 1.25rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .controls {
+            background-color: rgba(0, 0, 0, 0.9);
+            border: 1px solid #222222;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.12);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            width: 100%; /* Take full width of the container */
+        }
+        @media (min-width: 768px) {
+            .controls {
+                flex-direction: row;
+                width: auto;
+                align-items: center;
+            }
+        }
+        input[type="text"] { width: 100%; }
+        @media (min-width: 768px) { input[type="text"] { width: 20rem; } }
+
+        .toggle-container { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; }
+        input[type="checkbox"] {
+            -webkit-appearance: none; -moz-appearance: none; appearance: none;
+            height: 1rem; width: 1rem;
+            background-color: #111; border: 1px solid #222222;
+            border-radius: 0.25rem; cursor: pointer; position: relative;
+            transition: background-color 0.2s;
+        }
+        input[type="checkbox"]:checked { background-color: #f7fafc; border-color: #f7fafc; }
+        input[type="checkbox"]:checked:after {
+            content: ''; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(45deg);
+            width: 0.25rem; height: 0.5rem;
+            border: solid #111111; border-width: 0 2px 2px 0;
+        }
+        #error-message {
+            color: #f87171; padding: 0.5rem 1rem; border-radius: 0.25rem;
+            text-align: center; opacity: 0; transition: opacity 0.5s ease-in-out;
+            margin-top: 0.5rem; font-size: 0.875rem;
+            background-color: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4);
+            pointer-events: none;
+        }
+        label { white-space: nowrap; }
+        .help-button {
+            position: absolute; top: 1rem; right: 1rem; width: 2.5rem; height: 2.5rem;
+            border-radius: 0.375rem; background-color: rgba(0, 0, 0, 0.9);
+            color: #f7fafc; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-weight: bold; font-size: 1.25rem;
+            border: 1px solid #222222; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.12);
+        }
+        .help-modal {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 90%; max-width: 600px; height: 80%;
+            background-color: rgba(0, 0, 0, 0.95); border: 1px solid #222222;
+            border-radius: 0.5rem; padding: 1.5rem; z-index: 20;
+            overflow-y: auto; color: #f7fafc;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+            display: none;
+        }
+        .help-modal h3 { font-weight: bold; font-size: 1.25rem; margin-bottom: 0.5rem; }
+        .help-modal h4 { font-weight: bold; font-size: 1.1rem; margin-top: 1rem; }
+        .help-modal ul { list-style: none; padding-left: 0; margin-bottom: 1rem; }
+        .help-modal li { margin-bottom: 0.25rem; font-family: monospace; }
+        #mouse-output-display {
+            position: absolute; top: 1rem; left: 1rem; z-index: 10;
+            background-color: rgba(0, 0, 0, 0.7); border: 1px solid #222222;
+            border-radius: 0.5rem; padding: 0.5rem; font-size: 0.875rem;
+            color: #f7fafc; font-family: 'Inter', sans-serif; text-shadow: 1px 1px 2px #000;
+            pointer-events: none;
+        }
+        input[type=range] {
+          -webkit-appearance: none; width: 100%; background: transparent;
+        }
+        input[type=range]:focus { outline: none; }
+        input[type=range]::-webkit-slider-runnable-track {
+          width: 100%; height: 0.5rem; background: #4b5563; border-radius: 0.25rem;
+        }
+        input[type=range]::-webkit-slider-thumb {
+          -webkit-appearance: none; border: 1px solid #f7fafc;
+          height: 1rem; width: 1rem; border-radius: 50%;
+          background: #f7fafc; cursor: pointer; margin-top: -0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="main-canvas"></canvas>
+    <div id="mouse-output-display">z = 0.000 + 0.000i | f(z) = 0.000 + 0.000i</div>
+    <div class="help-button" id="help-button">?</div>
+    <div id="help-modal" class="help-modal">
+        <h3>Available Functions and Variables</h3>
+        <p class="text-sm text-slate-400 mb-4">
+            Use these to build your function f(z).
+            'z' represents the entire complex number, while 'a' is the real part and 'b' is the imaginary/hyperbolic part.
+        </p>
+        <div class="space-y-4 text-slate-200">
+            <div>
+                <h4>Variables & Constants</h4>
+                <ul class="list-disc list-inside ml-4 text-sm text-slate-300">
+                    <li>z: The input number.</li>
+                    <li>a: The real component of the input number.</li>
+                    <li>b: The imaginary/hyperbolic component of the input number.</li>
+                    <li>i: The imaginary unit for Normal Complex numbers.</li>
+                    <li>j: The hyperbolic/dual unit for Split and Dual Complex numbers.</li>
+                    <li>pi, e, phi, tau: Mathematical constants.</li>
+                </ul>
+            </div>
+            <div>
+                <h4>Functions</h4>
+                <ul class="list-disc list-inside ml-4 text-sm text-slate-300">
+                    <li>exp(z), log(z), sqrt(z), abs(z), arg(z), sgn(z), conj(z), re(z), im(z)</li>
+                    <li>sin(z), cos(z), tan(z)</li>
+                    <li>asin(z), acos(z), atan(z) (Note: Not available for Split-Complex)</li>
+                    <li>sinh(z), cosh(z), tanh(z)</li>
+                    <li>asinh(z), acosh(z), atanh(z)</li>
+                </ul>
+            </div>
+            <div>
+                <h4>Operators</h4>
+                <ul class="list-disc list-inside ml-4 text-sm text-slate-300">
+                    <li>+: Addition</li>
+                    <li>-: Subtraction</li>
+                    <li>*: Multiplication</li>
+                    <li>/: Division</li>
+                    <li>^: Exponentiation</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- New container for all bottom UI elements -->
+    <div id="bottom-ui-container">
+        <div class="controls p-2">
+            <div class="flex flex-col sm:flex-row items-center gap-2 w-full">
+                <div class="flex items-center gap-2 w-full sm:w-auto flex-grow">
+                    <label class="text-sm shrink-0" id="equation-label">f(z)=</label>
+                    <input id="equation-input" type="text" value="z^2">
+                </div>
+                <div class="flex flex-wrap items-center justify-center gap-2 mt-2 sm:mt-0">
+                    <select id="number-system-select" class="controls-ui-button">
+                        <option value="0">Normal Complex</option>
+                        <option value="1">Split-Complex</option>
+                        <option value="2">Dual Complex</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex flex-wrap items-center justify-center gap-2 mt-2 sm:mt-0">
+                <div class="flex items-center gap-2">
+                    <label for="darkness-slider" class="text-sm shrink-0">Contour Shading</label>
+                    <input id="darkness-slider" type="range" min="0" max="1" step="0.01" value="0.7">
+                </div>
+                <div class="toggle-container">
+                    <input type="checkbox" id="checkerboard-toggle" class="form-checkbox">
+                    <label for="checkerboard-toggle" class="text-sm">Show Checkerboard</label>
+                </div>
+            </div>
+        </div>
+        <div id="action-buttons">
+            <button id="zoom-in-btn" class="controls-ui-button zoom-btn">+</button>
+            <button id="zoom-out-btn" class="controls-ui-button zoom-btn">-</button>
+            <button id="reset-view-btn" class="controls-ui-button">Reset</button>
+        </div>
+    </div>
+    
+    <div id="error-message" class="w-full sm:w-80" style="position: absolute; top: 1rem; left: 50%; transform: translateX(-50%);"></div>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+    
+    <script id="fragment-shader-template" type="x-shader/x-fragment">
+        precision highp float;
+        // --- Uniforms from Javascript ---
+        uniform vec2 u_resolution;
+        uniform vec2 u_pan;
+        uniform float u_zoom;
+        uniform int u_number_system; // 0: Complex, 1: Split, 2: Dual
+        uniform bool u_show_checkerboard;
+        uniform float u_min_brightness;
+
+        varying vec2 vUv;
+
+        // --- Constants ---
+        const float PI = 3.14159265359;
+        const float E = 2.71828182846;
+        const float PHI = 1.61803398875;
+        const float TAU = 6.28318530718;
+
+        // --- GLSL Complex Math Library ---
+        float safe_div(float num, float den) { return (den == 0.0) ? 0.0 : num / den; }
+
+        // --- Forward declarations ---
+        vec2 c_mult(vec2 a, vec2 b); vec2 c_div(vec2 a, vec2 b); vec2 c_log(vec2 z); vec2 c_exp(vec2 z);
+        vec2 s_mult(vec2 a, vec2 b); vec2 s_div(vec2 a, vec2 b); vec2 s_log(vec2 z); vec2 s_exp(vec2 z);
+        vec2 d_mult(vec2 a, vec2 b); vec2 d_div(vec2 a, vec2 b); vec2 d_log(vec2 z); vec2 d_exp(vec2 z);
+
+        // --- Integer Power Functions (to avoid log/exp discontinuity) ---
+        vec2 c_pow_int(vec2 z, int p) {
+            if (p == 0) return vec2(1.0, 0.0);
+            vec2 res = vec2(1.0, 0.0);
+            vec2 b = z;
+            if (p < 0) { b = c_div(vec2(1.0, 0.0), z); p = -p; }
+            for (int i = 0; i < 10; i++) { if (i >= p) break; res = c_mult(res, b); }
+            return res;
+        }
+        vec2 s_pow_int(vec2 z, int p) {
+            if (p == 0) return vec2(1.0, 0.0);
+            vec2 res = vec2(1.0, 0.0);
+            vec2 b = z;
+            if (p < 0) { b = s_div(vec2(1.0, 0.0), z); p = -p; }
+            for (int i = 0; i < 10; i++) { if (i >= p) break; res = s_mult(res, b); }
+            return res;
+        }
+        vec2 d_pow_int(vec2 z, int p) {
+            if (p == 0) return vec2(1.0, 0.0);
+            vec2 res = vec2(1.0, 0.0);
+            vec2 b = z;
+            if (p < 0) { b = d_div(vec2(1.0, 0.0), z); p = -p; }
+            for (int i = 0; i < 10; i++) { if (i >= p) break; res = d_mult(res, b); }
+            return res;
+        }
+
+        // --- Normal Complex (i*i = -1) ---
+        vec2 c_add(vec2 a, vec2 b) { return a + b; }
+        vec2 c_sub(vec2 a, vec2 b) { return a - b; }
+        vec2 c_mult(vec2 a, vec2 b) { return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
+        vec2 c_div(vec2 a, vec2 b) { float d = dot(b,b); return (d==0.0) ? vec2(0.0/0.0) : vec2(a.x*b.x + a.y*b.y, a.y*b.x - a.x*b.y) / d; }
+        vec2 c_conj(vec2 z) { return vec2(z.x, -z.y); }
+        float c_arg(vec2 z) { return atan(z.y, z.x); }
+        vec2 c_log(vec2 z) { return vec2(log(length(z)), c_arg(z)); }
+        vec2 c_exp(vec2 z) { return vec2(exp(z.x) * cos(z.y), exp(z.x) * sin(z.y)); }
+        vec2 c_pow(vec2 z, vec2 p) { if (p.y == 0.0 && p.x >= -10.0 && p.x <= 10.0 && fract(p.x) == 0.0) { return c_pow_int(z, int(p.x)); } return c_exp(c_mult(c_log(z), p)); }
+        vec2 c_sqrt(vec2 z) { float r = sqrt(length(z)); float a = c_arg(z) / 2.0; return vec2(r * cos(a), r * sin(a)); }
+        vec2 c_sin(vec2 z) { return vec2(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y)); }
+        vec2 c_cos(vec2 z) { return vec2(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y)); }
+        vec2 c_tan(vec2 z) { return c_div(c_sin(z), c_cos(z)); }
+        vec2 c_asin(vec2 z) { vec2 i = vec2(0.0, 1.0); return c_mult(-i, c_log(c_add(c_mult(i, z), c_sqrt(c_sub(vec2(1.0, 0.0), c_mult(z,z)))))); }
+        vec2 c_acos(vec2 z) { vec2 i = vec2(0.0, 1.0); return c_add(vec2(PI/2.0, 0.0), c_mult(i, c_log(c_add(c_mult(i, z), c_sqrt(c_sub(vec2(1.0, 0.0), c_mult(z,z))))))); }
+        vec2 c_atan(vec2 z) { vec2 i = vec2(0.0, 1.0); vec2 half_i = vec2(0.0, 0.5); return c_mult(half_i, c_log(c_div(c_add(i,z), c_sub(i,z))));}
+        vec2 c_sinh(vec2 z) { return vec2(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y)); }
+        vec2 c_cosh(vec2 z) { return vec2(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y)); }
+        vec2 c_tanh(vec2 z) { return c_div(c_sinh(z), c_cosh(z)); }
+        vec2 c_asinh(vec2 z) { return c_log(c_add(z, c_sqrt(c_add(c_mult(z,z), vec2(1.0,0.0))))); }
+        vec2 c_acosh(vec2 z) { return c_log(c_add(z, c_sqrt(c_sub(c_mult(z,z), vec2(1.0,0.0))))); }
+        vec2 c_atanh(vec2 z) { return c_mult(vec2(0.5,0.0), c_log(c_div(c_add(vec2(1.0,0.0),z), c_sub(vec2(1.0,0.0),z)))); }
+        
+        // --- Split-Complex (j*j = 1) ---
+        vec2 s_add(vec2 a, vec2 b) { return a + b; }
+        vec2 s_sub(vec2 a, vec2 b) { return a - b; }
+        vec2 s_mult(vec2 a, vec2 b) { return vec2(a.x*b.x + a.y*b.y, a.x*b.y + a.y*b.x); }
+        vec2 s_div(vec2 a, vec2 b) { float d = b.x*b.x - b.y*b.y; return (d==0.0) ? vec2(0.0/0.0) : vec2(a.x*b.x - a.y*b.y, a.y*b.x - a.x*b.y) / d; }
+        vec2 s_conj(vec2 z) { return vec2(z.x, -z.y); }
+        float s_norm(vec2 z) { return z.x*z.x - z.y*z.y; }
+        float s_arg(vec2 z) { return atanh(clamp(safe_div(z.y, z.x), -0.99999, 0.99999)); }
+        vec2 s_log(vec2 z) { float n = s_norm(z); return (n<=0.0) ? vec2(0.0/0.0) : vec2(0.5 * log(n), s_arg(z)); }
+        vec2 s_exp(vec2 z) { return vec2(exp(z.x) * cosh(z.y), exp(z.x) * sinh(z.y)); }
+        vec2 s_pow(vec2 z, vec2 p) { if (p.y == 0.0 && p.x >= -10.0 && p.x <= 10.0 && fract(p.x) == 0.0) { return s_pow_int(z, int(p.x)); } return s_exp(s_mult(s_log(z), p)); }
+        vec2 s_sqrt(vec2 z) { float n = s_norm(z); if (n<0.0) return vec2(0.0/0.0); float r = sqrt(n); float a = s_arg(z)/2.0; return vec2(r*cosh(a), r*sinh(a)); }
+        vec2 s_sin(vec2 z) { return vec2(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y)); }
+        vec2 s_cos(vec2 z) { return vec2(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y)); }
+        vec2 s_tan(vec2 z) { return s_div(s_sin(z), s_cos(z)); }
+        vec2 s_sinh(vec2 z) { return vec2(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y)); }
+        vec2 s_cosh(vec2 z) { return vec2(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y)); }
+        vec2 s_tanh(vec2 z) { return s_div(s_sinh(z), s_cosh(z)); }
+        vec2 s_asinh(vec2 z) { return s_log(s_add(z, s_sqrt(s_add(s_mult(z,z), vec2(1.0,0.0))))); }
+        vec2 s_acosh(vec2 z) { return s_log(s_add(z, s_sqrt(s_sub(s_mult(z,z), vec2(1.0,0.0))))); }
+        vec2 s_atanh(vec2 z) { return s_mult(vec2(0.5,0.0), s_log(s_div(s_add(vec2(1.0,0.0),z), s_sub(vec2(1.0,0.0),z)))); }
+
+        // --- Dual (j*j = 0) ---
+        vec2 d_add(vec2 a, vec2 b) { return a + b; }
+        vec2 d_sub(vec2 a, vec2 b) { return a - b; }
+        vec2 d_mult(vec2 a, vec2 b) { return vec2(a.x*b.x, a.x*b.y + a.y*b.x); }
+        vec2 d_div(vec2 a, vec2 b) { return (b.x==0.0) ? vec2(0.0/0.0) : vec2(a.x/b.x, (a.y*b.x - a.x*b.y)/(b.x*b.x)); }
+        vec2 d_conj(vec2 z) { return vec2(z.x, -z.y); }
+        float d_arg(vec2 z) { return safe_div(z.y, z.x); }
+        vec2 d_log(vec2 z) { return (z.x <= 0.0) ? vec2(0.0/0.0) : vec2(log(z.x), safe_div(z.y, z.x)); }
+        vec2 d_exp(vec2 z) { return vec2(exp(z.x), z.y * exp(z.x)); }
+        vec2 d_pow(vec2 z, vec2 p) { if (p.y == 0.0 && p.x >= -10.0 && p.x <= 10.0 && fract(p.x) == 0.0) { return d_pow_int(z, int(p.x)); } if (z.x <= 0.0 && p.y != 0.0) return vec2(0.0/0.0); float x_pow_px = pow(z.x, p.x); return vec2(x_pow_px, p.x * z.y * pow(z.x, p.x - 1.0) + p.y * x_pow_px * log(z.x)); }
+        vec2 d_sqrt(vec2 z) { return (z.x < 0.0) ? vec2(0.0/0.0) : vec2(sqrt(z.x), safe_div(z.y, 2.0 * sqrt(z.x))); }
+        vec2 d_sin(vec2 z) { return vec2(sin(z.x), z.y * cos(z.x)); }
+        vec2 d_cos(vec2 z) { return vec2(cos(z.x), -z.y * sin(z.x)); }
+        vec2 d_tan(vec2 z) { return d_div(d_sin(z), d_cos(z)); }
+        vec2 d_asin(vec2 z) { if (abs(z.x) > 1.0) return vec2(0.0/0.0); return vec2(asin(z.x), z.y / sqrt(1.0 - z.x*z.x)); }
+        vec2 d_acos(vec2 z) { if (abs(z.x) > 1.0) return vec2(0.0/0.0); return vec2(acos(z.x), -z.y / sqrt(1.0 - z.x*z.x)); }
+        vec2 d_atan(vec2 z) { return vec2(atan(z.x), z.y / (1.0 + z.x*z.x)); }
+        vec2 d_sinh(vec2 z) { return vec2(sinh(z.x), z.y * cosh(z.x)); }
+        vec2 d_cosh(vec2 z) { return vec2(cosh(z.x), z.y * sinh(z.x)); }
+        vec2 d_tanh(vec2 z) { return d_div(d_sinh(z), d_cosh(z)); }
+        vec2 d_asinh(vec2 z) { return d_log(d_add(z, d_sqrt(d_add(d_mult(z,z), vec2(1.0,0.0))))); }
+        vec2 d_acosh(vec2 z) { return d_log(d_add(z, d_sqrt(d_sub(d_mult(z,z), vec2(1.0,0.0))))); }
+        vec2 d_atanh(vec2 z) { return d_mult(vec2(0.5,0.0), d_log(d_div(d_add(vec2(1.0,0.0),z), d_sub(vec2(1.0,0.0),z)))); }
+
+        // --- Color Conversion ---
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        // --- User Function (to be replaced by JS) ---
+        vec2 user_function(vec2 z) {
+            if (u_number_system == 0) { // Complex
+                // $$_FUNCTION_BODY_C_$$
+            } else if (u_number_system == 1) { // Split
+                // $$_FUNCTION_BODY_S_$$
+            } else { // Dual
+                // $$_FUNCTION_BODY_D_$$
+            }
+            return vec2(0.0, 0.0); // Fallback
+        }
+
+        void main() {
+            float aspect = u_resolution.x / u_resolution.y;
+            vec2 plane_coords = (vUv - 0.5) * vec2(10.0 * aspect, 10.0);
+            vec2 z = (plane_coords / u_zoom) + u_pan;
+
+            vec2 f_z = user_function(z);
+
+            // --- Coloring Logic ---
+            float hue, saturation = 1.0, value;
+
+            if (u_number_system == 0) { hue = (atan(f_z.y, f_z.x) + PI) / TAU; } 
+            else if (u_number_system == 1) { hue = mod((atanh(clamp(safe_div(f_z.y, f_z.x), -0.99999, 0.99999)) + PI) / TAU, 1.0); } 
+            else { hue = mod(safe_div(f_z.y, f_z.x) / TAU, 1.0); }
+            
+            float magnitude = length(f_z);
+            float log_mag = log2(magnitude > 1e-9 ? magnitude : 1e-9);
+            float log_mag_frac = fract(log_mag);
+
+            value = 1.0 - log_mag_frac * (1.0 - u_min_brightness);
+            value = max(u_min_brightness, value);
+
+            vec3 color = hsv2rgb(vec3(hue, saturation, value));
+
+            if (u_show_checkerboard) {
+                vec2 check = floor(f_z * 8.0);
+                if (mod(check.x + check.y, 2.0) == 0.0) { color *= 0.7; }
+            }
+            
+            if (isinf(f_z.x) || isinf(f_z.y) || isnan(f_z.x) || isnan(f_z.y)) {
+                color = vec3(0.0);
+            }
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <script>
+        window.onload = function() {
+            // --- Mathematical Core (for mouse display) ---
+            const C = (x, y) => new Complex(x, y);
+            class Complex {
+                constructor(x=0,y=0){this.x=x;this.y=y;}
+                static get i(){return new Complex(0,1);}
+                add(o){return C(this.x+o.x,this.y+o.y);}
+                sub(o){return C(this.x-o.x,this.y-o.y);}
+                mult(o){return C(this.x*o.x-this.y*o.y,this.x*o.y+this.y*o.x);}
+                div(o){const d=o.x*o.x+o.y*o.y;return d===0?C(NaN,NaN):C((this.x*o.x+this.y*o.y)/d,(this.y*o.x-this.x*o.y)/d);}
+                pow(o){if(o.y===0&&Number.isInteger(o.x)&&Math.abs(o.x)<=10){let r=C(1,0),b=this;let p=o.x;if(p<0){b=C(1,0).div(this);p=-p;}for(let i=0;i<p;i++){r=r.mult(b);}return r;}return this.log().mult(o).exp();}
+                conj(){return C(this.x,-this.y);} abs(){return Math.sqrt(this.x*this.x+this.y*this.y);} arg(){return Math.atan2(this.y,this.x);} re(){return this.x;} im(){return this.y;}
+                log(){return C(Math.log(this.abs()),this.arg());} exp(){return C(Math.exp(this.x)*Math.cos(this.y),Math.exp(this.x)*Math.sin(this.y));}
+                sqrt(){const r=Math.sqrt(this.abs());const a=this.arg()/2;return C(r*Math.cos(a),r*Math.sin(a));}
+                sin(){return C(Math.sin(this.x)*Math.cosh(this.y),Math.cos(this.x)*Math.sinh(this.y));} cos(){return C(Math.cos(this.x)*Math.cosh(this.y),-Math.sin(this.x)*Math.sinh(this.y));}
+                tan(){return this.sin().div(this.cos());}
+                asin(){const i=C(0,1);return C(1,0).sub(this.mult(this)).sqrt().add(this.mult(i)).log().mult(i.mult(C(-1,0)));}
+                acos(){const i=C(0,1);return C(Math.PI/2,0).add(i.mult(i.mult(this).add(C(1,0).sub(this.mult(this)).sqrt()).log()));}
+                atan(){const i=C(0,1);return i.add(this).div(i.sub(this)).log().mult(C(0,0.5));}
+                sinh(){return C(Math.sinh(this.x)*Math.cos(this.y),Math.cosh(this.x)*Math.sin(this.y));} cosh(){return C(Math.cosh(this.x)*Math.cos(this.y),Math.sinh(this.x)*Math.sin(this.y));}
+                tanh(){return this.sinh().div(this.cosh());}
+                asinh(){return this.mult(this).add(C(1,0)).sqrt().add(this).log();} acosh(){return this.mult(this).sub(C(1,0)).sqrt().add(this).log();}
+                atanh(){return C(1,0).add(this).div(C(1,0).sub(this)).log().mult(C(0.5,0));}
+                sgn(){const l=this.abs();return l===0?C(0,0):this.div(C(l,0));}
+                toString(){const r=this.x.toFixed(3);const i=this.y.toFixed(3);if(isNaN(r)||isNaN(i))return'NaN';if(this.y===0)return r;if(this.x===0)return `${i}i`;if(this.y<0)return `${r} - ${Math.abs(i)}i`;return `${r} + ${i}i`;}
+            }
+            const S = (x, y) => new SplitComplex(x, y);
+            class SplitComplex {
+                constructor(x=0,y=0){this.x=x;this.y=y;}
+                static get j(){return S(0,1);}
+                add(o){return S(this.x+o.x,this.y+o.y);} sub(o){return S(this.x-o.x,this.y-o.y);}
+                mult(o){return S(this.x*o.x+this.y*o.y,this.x*o.y+this.y*o.x);}
+                div(o){const d=o.x*o.x-o.y*o.y;return d===0?S(NaN,NaN):S((this.x*o.x-this.y*o.y)/d,(this.y*o.x-this.x*o.y)/d);}
+                pow(o){if(o.y===0&&Number.isInteger(o.x)&&Math.abs(o.x)<=10){let r=S(1,0),b=this;let p=o.x;if(p<0){b=S(1,0).div(this);p=-p;}for(let i=0;i<p;i++){r=r.mult(b);}return r;}return this.log().mult(o).exp();}
+                conj(){return S(this.x,-this.y);} norm(){return this.x*this.x-this.y*this.y;} abs(){return Math.sqrt(Math.abs(this.norm()));} arg(){return Math.atanh(this.y/this.x);} re(){return this.x;} im(){return this.y;}
+                log(){const n=this.norm();return n<=0?S(NaN,NaN):S(0.5*Math.log(n),this.arg());} exp(){return S(Math.exp(this.x)*Math.cosh(this.y),Math.exp(this.x)*Math.sinh(this.y));}
+                sqrt(){const n=this.norm();if(n<0)return S(NaN,NaN);const r=Math.sqrt(n);const a=this.arg()/2;return S(r*Math.cosh(a),r*Math.sinh(a));}
+                sin(){return S(Math.sin(this.x)*Math.cosh(this.y),Math.cos(this.x)*Math.sinh(this.y));} cos(){return S(Math.cos(this.x)*Math.cosh(this.y),-Math.sin(this.x)*Math.sinh(this.y));}
+                tan(){return this.sin().div(this.cos());}
+                sinh(){return S(Math.sinh(this.x)*Math.cos(this.y),Math.cosh(this.x)*Math.sin(this.y));} cosh(){return S(Math.cosh(this.x)*Math.cos(this.y),Math.sinh(this.x)*Math.sin(this.y));}
+                tanh(){return this.sinh().div(this.cosh());}
+                asinh(){return this.mult(this).add(S(1,0)).sqrt().add(this).log();} acosh(){return this.mult(this).sub(S(1,0)).sqrt().add(this).log();}
+                atanh(){return S(1,0).add(this).div(S(1,0).sub(this)).log().mult(S(0.5,0));}
+                sgn(){const l=this.abs();return l===0?S(0,0):this.div(S(l,0));}
+                toString(){const r=this.x.toFixed(3);const i=this.y.toFixed(3);if(isNaN(r)||isNaN(i))return'NaN';if(this.y===0)return r;if(this.x===0)return `${i}j`;if(this.y<0)return `${r} - ${Math.abs(i)}j`;return `${r} + ${i}j`;}
+            }
+            const D = (x, y) => new DualComplex(x, y);
+            class DualComplex {
+                constructor(x=0,y=0){this.x=x;this.y=y;}
+                static get j(){return D(0,1);}
+                add(o){return D(this.x+o.x,this.y+o.y);} sub(o){return D(this.x-o.x,this.y-o.y);}
+                mult(o){return D(this.x*o.x,this.x*o.y+this.y*o.x);}
+                div(o){return o.x===0?D(NaN,NaN):D(this.x/o.x,(this.y*o.x-this.x*o.y)/(o.x*o.x));}
+                pow(o){if(o.y===0&&Number.isInteger(o.x)&&Math.abs(o.x)<=10){let r=D(1,0),b=this;let p=o.x;if(p<0){b=D(1,0).div(this);p=-p;}for(let i=0;i<p;i++){r=r.mult(b);}return r;}if(this.x<=0&&o.y!==0)return D(NaN,NaN);const x_px=Math.pow(this.x,o.x);return D(x_px,o.x*this.y*Math.pow(this.x,o.x-1)+o.y*x_px*Math.log(this.x));}
+                conj(){return D(this.x,-this.y);} abs(){return Math.abs(this.x);} arg(){return this.x===0?0:this.y/this.x;} re(){return this.x;} im(){return this.y;}
+                log(){return this.x<=0?D(NaN,NaN):D(Math.log(this.x),this.y/this.x);} exp(){return D(Math.exp(this.x),this.y*Math.exp(this.x));}
+                sqrt(){if(this.x<0)return D(NaN,NaN);const sx=Math.sqrt(this.x);return D(sx,this.y/(2*sx));}
+                sin(){return D(Math.sin(this.x),this.y*Math.cos(this.x));} cos(){return D(Math.cos(this.x),-this.y*Math.sin(this.x));}
+                tan(){return this.sin().div(this.cos());}
+                asin(){if(Math.abs(this.x)>1)return D(NaN,NaN);return D(Math.asin(this.x),this.y/Math.sqrt(1-this.x*this.x));}
+                acos(){if(Math.abs(this.x)>1)return D(NaN,NaN);return D(Math.acos(this.x),-this.y/Math.sqrt(1-this.x*this.x));}
+                atan(){return D(Math.atan(this.x),this.y/(1+this.x*this.x));}
+                sinh(){return D(Math.sinh(this.x),this.y*Math.cosh(this.x));} cosh(){return D(Math.cosh(this.x),this.y*Math.sinh(this.x));}
+                tanh(){return this.sinh().div(this.cosh());}
+                asinh(){return this.mult(this).add(D(1,0)).sqrt().add(this).log();} acosh(){return this.mult(this).sub(D(1,0)).sqrt().add(this).log();}
+                atanh(){return D(1,0).add(this).div(D(1,0).sub(this)).log().mult(D(0.5,0));}
+                sgn(){return this.x===0?D(0,0):D(Math.sign(this.x),0);}
+                toString(){const r=this.x.toFixed(3);const i=this.y.toFixed(3);if(isNaN(r)||isNaN(i))return'NaN';if(this.y===0)return r;if(this.x===0)return `${i}j`;if(this.y<0)return `${r} - ${Math.abs(i)}j`;return `${r} + ${i}j`;}
+            }
+
+            // --- Three.js Setup and Visualization Logic ---
+            let scene, renderer, camera, planeMesh, shaderMaterial;
+            let lastValidState = {};
+            let errorMessageTimeout, renderDebounce;
+            let NumberSystemClassForCPU = Complex;
+            let NumberSystemConstructorForCPU = C;
+
+            const state = {
+                pan: { x: 0, y: 0 },
+                zoom: 1,
+                lastMousePos: { x: 0, y: 0 },
+                isPanning: false,
+                needsRender: true,
+            };
+
+            const canvas = document.getElementById('main-canvas');
+            const equationInput = document.getElementById('equation-input');
+            const checkerboardToggle = document.getElementById('checkerboard-toggle');
+            const numberSystemSelect = document.getElementById('number-system-select');
+            const errorMessageDiv = document.getElementById('error-message');
+            const helpButton = document.getElementById('help-button');
+            const helpModal = document.getElementById('help-modal');
+            const mouseOutputDisplay = document.getElementById('mouse-output-display');
+            const darknessSlider = document.getElementById('darkness-slider');
+            const zoomInBtn = document.getElementById('zoom-in-btn');
+            const zoomOutBtn = document.getElementById('zoom-out-btn');
+            const resetViewBtn = document.getElementById('reset-view-btn');
+
+            const init = () => {
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                scene = new THREE.Scene();
+                camera = new THREE.OrthographicCamera(width / -2, width / 2, height / 2, height / -2, 1, 1000);
+                camera.position.z = 10;
+                renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: "high-performance" });
+                renderer.setSize(width, height);
+                renderer.setPixelRatio(window.devicePixelRatio); 
+                
+                shaderMaterial = new THREE.ShaderMaterial({
+                    vertexShader: document.getElementById('vertex-shader').textContent,
+                    fragmentShader: "void main() { gl_FragColor = vec4(0.0); }", // Placeholder
+                    uniforms: {
+                        u_resolution: { value: new THREE.Vector2(width, height) },
+                        u_pan: { value: new THREE.Vector2(state.pan.x, state.pan.y) },
+                        u_zoom: { value: state.zoom },
+                        u_number_system: { value: 0 },
+                        u_show_checkerboard: { value: false },
+                        u_min_brightness: { value: 0.7 },
+                    },
+                    extensions: { derivatives: true } 
+                });
+
+                const planeGeometry = new THREE.PlaneGeometry(width, height);
+                planeMesh = new THREE.Mesh(planeGeometry, shaderMaterial);
+                scene.add(planeMesh);
+                
+                updateEquation();
+            };
+
+            // --- Equation Parsing and GLSL/CPU Function Generation ---
+            const operators = {
+                '^': { p: 4, a: 'R', n: 'pow' }, '*': { p: 3, a: 'L', n: 'mult' }, '/': { p: 3, a: 'L', n: 'div' },
+                '+': { p: 2, a: 'L', n: 'add' }, '-': { p: 2, a: 'L', n: 'sub' },
+            };
+            const functions = {
+                'exp': 'exp', 'log': 'log', 'sqrt': 'sqrt', 'sin': 'sin', 'cos': 'cos', 'tan': 'tan',
+                'sinh': 'sinh', 'cosh': 'cosh', 'tanh': 'tanh', 'asin': 'asin', 'acos': 'acos', 'atan': 'atan',
+                'asinh': 'asinh', 'acosh': 'acosh', 'atanh': 'atanh', 're': { cpu: 're', glsl: 'vec2(z.x, 0.0)', noP: true },
+                'im': { cpu: 'im', glsl: 'vec2(z.y, 0.0)', noP: true }, 'abs': { cpu: 'abs', glsl: 'vec2(length(z), 0.0)', noP: true },
+                'arg': { cpu: 'arg', n: 'arg' }, 'conj': { cpu: 'conj', n: 'conj' }, 'sgn': { cpu: 'sgn', glsl: 'normalize(z)', noP: true }
+            };
+            const isOp = t => operators[t], isFn = t => functions[t], isConst = t => ['j','i','pi','e','phi','tau'].includes(t), isVar = t => ['z','a','b'].includes(t);
+            const consts = { 'pi': Math.PI, 'e': Math.E, 'phi': 1.618, 'tau': Math.PI * 2 };
+            const glslConsts = { 'pi': 'PI', 'e': 'E', 'phi': 'PHI', 'tau': 'TAU' };
+
+            const toPostfix = (tokens) => {
+                const out = [], stack = [];
+                tokens.forEach(t => {
+                    if (!isNaN(parseFloat(t)) || isVar(t) || isConst(t)) out.push(t);
+                    else if (isFn(t)) stack.push(t);
+                    else if (isOp(t)) {
+                        while (stack.length && isOp(stack[stack.length-1]) && ((operators[stack[stack.length-1]].a==='L' && operators[stack[stack.length-1]].p >= operators[t].p) || (operators[stack[stack.length-1]].a==='R' && operators[stack[stack.length-1]].p > operators[t].p))) {
+                            out.push(stack.pop());
+                        }
+                        stack.push(t);
+                    } else if (t === '(') stack.push(t);
+                    else if (t === ')') {
+                        while (stack.length && stack[stack.length-1] !== '(') out.push(stack.pop());
+                        if (!stack.length || stack.pop() !== '(') throw new Error('Mismatched parentheses');
+                        if (isFn(stack[stack.length-1])) out.push(stack.pop());
+                    } else throw new Error(`Invalid token: ${t}`);
+                });
+                while (stack.length) {
+                    const op = stack.pop();
+                    if (op === '(' || op === ')') throw new Error('Mismatched parentheses');
+                    out.push(op);
+                }
+                return out;
+            };
+
+            const generateGlslFromPostfix = (postfix, prefix) => {
+                const p = prefix + '_', stack = [];
+                postfix.forEach(t => {
+                    if (!isNaN(parseFloat(t))) stack.push(`vec2(${parseFloat(t).toFixed(8)}, 0.0)`);
+                    else if (t === 'z') stack.push('z');
+                    else if (t === 'a') stack.push('vec2(z.x, 0.0)');
+                    else if (t === 'b') stack.push('vec2(z.y, 0.0)');
+                    else if (isConst(t)) {
+                        if (t === 'i' || t === 'j') stack.push('vec2(0.0, 1.0)');
+                        else stack.push(`vec2(${glslConsts[t]}, 0.0)`);
+                    } else if (isOp(t)) {
+                        const b=stack.pop(), a=stack.pop();
+                        if(!a||!b) throw new Error("Syntax error");
+                        stack.push(`${p}${operators[t].n}(${a}, ${b})`);
+                    } else if (isFn(t)) {
+                        const a=stack.pop();
+                        if(!a) throw new Error("Syntax error");
+                        const info=functions[t];
+                        if(info.noP) stack.push(info.glsl.replace('z',a));
+                        else stack.push(`${p}${info.n||info}(${a})`);
+                    }
+                });
+                if (stack.length !== 1) throw new Error("Invalid expression stack");
+                return `return ${stack[0]};`;
+            };
+            
+            const generateCpuFuncFromPostfix = (postfix) => {
+                const stack = [];
+                postfix.forEach(t => {
+                    if (!isNaN(parseFloat(t))) stack.push(`NumberSystemConstructorForCPU(${parseFloat(t)}, 0)`);
+                    else if (t === 'z') stack.push('z');
+                    else if (t === 'a') stack.push(`NumberSystemConstructorForCPU(z.re(), 0)`);
+                    else if (t === 'b') stack.push(`NumberSystemConstructorForCPU(z.im(), 0)`);
+                    else if (isConst(t)) {
+                        if(t==='i') stack.push('Complex.i');
+                        else if(t==='j') stack.push('NumberSystemClassForCPU.j');
+                        else stack.push(`NumberSystemConstructorForCPU(${consts[t]}, 0)`);
+                    } else if (isOp(t)) {
+                        const b = stack.pop(), a = stack.pop();
+                        if (!a || !b) throw new Error("Syntax error");
+                        stack.push(`${a}.${operators[t].n}(${b})`);
+                    } else if (isFn(t)) {
+                        const a = stack.pop();
+                        if (!a) throw new Error("Syntax error");
+                        const info = functions[t];
+                        stack.push(`${a}.${info.cpu||info.n||info}()`);
+                    }
+                });
+                if (stack.length !== 1) throw new Error("Invalid expression stack");
+                return new Function('z', 'Complex', 'SplitComplex', 'DualComplex', 'NumberSystemClassForCPU', 'NumberSystemConstructorForCPU', `return ${stack[0]}`);
+            };
+
+            const showError = (message) => {
+                clearTimeout(errorMessageTimeout);
+                errorMessageDiv.textContent = `Error: ${message}`;
+                errorMessageDiv.style.opacity = 1;
+                errorMessageTimeout = setTimeout(() => { errorMessageDiv.style.opacity = 0; }, 5000);
+            };
+            const clearError = () => { clearTimeout(errorMessageTimeout); errorMessageDiv.style.opacity = 0; };
+
+            const updateEquation = () => {
+                const expr = equationInput.value.trim().toLowerCase() || "z";
+                try {
+                    const tokens = expr.match(/(\^|\*|\/|\+|\-|\(|\))|([a-zA-Z_][a-zA-Z0-9_]*)|(\d+\.\d*|\.\d+|\d+)/g) || [];
+                    const postfix = toPostfix(tokens);
+                    
+                    const glslBodyC = generateGlslFromPostfix(postfix, 'c');
+                    const glslBodyS = generateGlslFromPostfix(postfix, 's');
+                    const glslBodyD =generateGlslFromPostfix(postfix, 'd');
+                    
+                    const baseShader = document.getElementById('fragment-shader-template').textContent;
+                    let finalShader = baseShader.replace('// $$_FUNCTION_BODY_C_$$', glslBodyC);
+                    finalShader = finalShader.replace('// $$_FUNCTION_BODY_S_$$', glslBodyS);
+                    finalShader = finalShader.replace('// $$_FUNCTION_BODY_D_$$', glslBodyD);
+
+                    const cpuFunc = generateCpuFuncFromPostfix(postfix);
+
+                    lastValidState.shader = finalShader;
+                    lastValidState.cpuFunc = cpuFunc;
+                    
+                    shaderMaterial.fragmentShader = finalShader;
+                    shaderMaterial.needsUpdate = true;
+
+                    clearError();
+                } catch (e) {
+                    showError(e.message);
+                }
+                markAsDirty();
+            };
+            
+            const animate = () => {
+                requestAnimationFrame(animate);
+                if (state.needsRender) {
+                    renderer.render(scene, camera);
+                    state.needsRender = false; 
+                }
+            };
+
+            const markAsDirty = () => {
+                clearTimeout(renderDebounce);
+                renderDebounce = setTimeout(() => {
+                    state.needsRender = true;
+                }, 10); 
+            };
+            
+            const resetView = () => {
+                state.pan = { x: 0, y: 0 };
+                state.zoom = 1;
+                shaderMaterial.uniforms.u_pan.value.set(state.pan.x, state.pan.y);
+                shaderMaterial.uniforms.u_zoom.value = state.zoom;
+                markAsDirty();
+            };
+
+            // --- Event Listeners and UI ---
+            window.addEventListener('resize', () => {
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                renderer.setSize(width, height);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                shaderMaterial.uniforms.u_resolution.value.set(width, height);
+                camera.left = width / -2; camera.right = width / 2;
+                camera.top = height / 2; camera.bottom = height / -2;
+                camera.updateProjectionMatrix();
+                markAsDirty();
+            });
+
+            equationInput.addEventListener('input', updateEquation);
+            
+            checkerboardToggle.addEventListener('change', (e) => {
+                shaderMaterial.uniforms.u_show_checkerboard.value = e.target.checked;
+                markAsDirty();
+            });
+            
+            helpButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                helpModal.style.display = helpModal.style.display === 'block' ? 'none' : 'block';
+            });
+            window.addEventListener('click', (e) => {
+                if (!helpModal.contains(e.target) && e.target !== helpButton) {
+                    helpModal.style.display = 'none';
+                }
+            });
+
+            numberSystemSelect.addEventListener('change', (e) => {
+                const selectedSystem = parseInt(e.target.value);
+                shaderMaterial.uniforms.u_number_system.value = selectedSystem;
+                if (selectedSystem === 0) { NumberSystemClassForCPU = Complex; NumberSystemConstructorForCPU = C; }
+                else if (selectedSystem === 1) { NumberSystemClassForCPU = SplitComplex; NumberSystemConstructorForCPU = S; }
+                else { NumberSystemClassForCPU = DualComplex; NumberSystemConstructorForCPU = D; }
+                markAsDirty();
+            });
+            
+            zoomInBtn.addEventListener('click', () => {
+                state.zoom *= 2.0; // Increased zoom power
+                shaderMaterial.uniforms.u_zoom.value = state.zoom;
+                markAsDirty();
+            });
+            zoomOutBtn.addEventListener('click', () => {
+                state.zoom /= 2.0; // Increased zoom power
+                shaderMaterial.uniforms.u_zoom.value = state.zoom;
+                markAsDirty();
+            });
+            resetViewBtn.addEventListener('click', resetView);
+
+            darknessSlider.addEventListener('input', (e) => {
+                shaderMaterial.uniforms.u_min_brightness.value = parseFloat(e.target.value);
+                markAsDirty();
+            });
+
+            const onPointerDown = (event) => {
+                if (event.target !== canvas) return;
+                state.isPanning = true;
+                canvas.style.cursor = 'grabbing';
+                state.lastMousePos.x = event.clientX;
+                state.lastMousePos.y = event.clientY;
+            };
+
+            const onPointerMove = (event) => {
+                updateMouseOutput(event);
+                if (!state.isPanning) return;
+                const dx = event.clientX - state.lastMousePos.x;
+                const dy = event.clientY - state.lastMousePos.y;
+                
+                // CORRECTED Panning Logic:
+                // This new calculation ensures 1:1 mouse-to-graph movement.
+                // It's based on the plane's fixed height of 10 units.
+                const panFactor = 10 / window.innerHeight / state.zoom;
+                state.pan.x -= dx * panFactor;
+                state.pan.y += dy * panFactor;
+
+                shaderMaterial.uniforms.u_pan.value.set(state.pan.x, state.pan.y);
+                state.lastMousePos.x = event.clientX;
+                state.lastMousePos.y = event.clientY;
+                markAsDirty();
+            };
+
+            const onPointerUp = () => {
+                state.isPanning = false;
+                canvas.style.cursor = 'grab';
+            };
+            
+            const updateMouseOutput = (event) => {
+                if (!lastValidState.cpuFunc) return;
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = event.clientX - rect.left;
+                const mouseY = event.clientY - rect.top;
+
+                const aspect = rect.width / rect.height;
+                const planeX = (mouseX / rect.width - 0.5) * (10.0 * aspect) / state.zoom + state.pan.x;
+                const planeY = -(mouseY / rect.height - 0.5) * 10.0 / state.zoom + state.pan.y;
+
+                const z_in = new NumberSystemClassForCPU(planeX, planeY);
+                let f_z;
+                try { 
+                    f_z = lastValidState.cpuFunc(z_in, Complex, SplitComplex, DualComplex, NumberSystemClassForCPU, NumberSystemConstructorForCPU);
+                } catch(e) { 
+                    f_z = new NumberSystemClassForCPU(NaN, NaN); 
+                }
+                mouseOutputDisplay.textContent = `z = ${z_in.toString()} | f(z) = ${f_z.toString()}`;
+            };
+
+            const onWheel = (event) => {
+                event.preventDefault();
+                const zoomFactor = event.deltaY > 0 ? 1/1.5 : 1.5; // Slightly less powerful than buttons for finer control
+                state.zoom *= zoomFactor;
+                shaderMaterial.uniforms.u_zoom.value = state.zoom;
+                markAsDirty();
+            };
+
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            window.addEventListener('pointerdown', onPointerDown, false);
+            window.addEventListener('pointermove', onPointerMove, false);
+            window.addEventListener('pointerup', onPointerUp, false);
+            window.addEventListener('wheel', onWheel, { passive: false });
+
+            init();
+            animate();
+        };
+    </script>
+</body>
+</html>
